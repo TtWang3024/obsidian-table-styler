@@ -1,7 +1,7 @@
 {
   "id": "table-styler",
   "name": "Table Styler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.5.0",
   "description": "Fix table column widths by dragging, and give cells background and text colours. Styles are saved in each cell as hidden comments, so they move with the cell.",
   "author": "Emerald_Ocean",

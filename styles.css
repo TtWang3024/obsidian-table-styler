@@ -2,37 +2,51 @@
 
 /*
  * Cell styles. The plugin marks a cell (data-tcs-*) and puts the value in a CSS variable
- * on it; !important lets a chosen colour beat theme stripes and hover backgrounds.
+ * on it. The cell also sets Obsidian's own table variables, so Obsidian's table rules
+ * (and themes built on them) paint the chosen colour and width too, with no forced rules.
  */
 td[data-tcs-bg],
 th[data-tcs-bg] {
-  background-color: var(--tcs-bg) !important;
+  --table-column-alt-background: var(--tcs-bg);
+  background-color: var(--tcs-bg);
 }
 
-td[data-tcs-fg],
+td[data-tcs-fg] {
+  --table-text-color: var(--tcs-fg);
+  color: var(--tcs-fg);
+}
+
 th[data-tcs-fg] {
-  color: var(--tcs-fg) !important;
+  --table-header-color: var(--tcs-fg);
+  color: var(--tcs-fg);
 }
 
 td[data-tcs-w],
 th[data-tcs-w] {
+  --table-column-min-width: var(--tcs-w);
+  --table-column-max-width: var(--tcs-w);
   box-sizing: border-box;
-  width: var(--tcs-w) !important;
-  min-width: var(--tcs-w) !important;
-  max-width: var(--tcs-w) !important;
+  width: var(--tcs-w);
+  min-width: var(--tcs-w);
+  max-width: var(--tcs-w);
   overflow-wrap: anywhere;
 }
 
-/* Column edge: drag to resize, double-click for automatic width. */
+/*
+ * Column edge: drag to resize, double-click for automatic width. Live Preview gives
+ * table cells a text cursor with a fairly specific rule, hence the longer selectors.
+ */
 table.tcs-col-edge,
-table.tcs-col-edge * {
-  cursor: col-resize !important;
+table.tcs-col-edge :is(th, td, th *, td *),
+.markdown-source-view.mod-cm6 .cm-table-widget table.tcs-col-edge :is(th, td, th *, td *) {
+  cursor: col-resize;
 }
 
 body.tcs-resizing,
-body.tcs-resizing * {
-  cursor: col-resize !important;
-  user-select: none !important;
+body.tcs-resizing *,
+body.tcs-resizing .markdown-source-view.mod-cm6 .cm-table-widget :is(th, td, th *, td *) {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* Popover */
