@@ -1,0 +1,9 @@
+{
+  "id": "table-styler",
+  "name": "Table Styler",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Fixed column widths (drag a column edge) plus cell background and text colours for Markdown tables. Styles are stored in the cells as hidden %%{...}%% comments, so they move with the cell.",
+  "author": "Emerald_Ocean",
+  "isDesktopOnly": false
+}
