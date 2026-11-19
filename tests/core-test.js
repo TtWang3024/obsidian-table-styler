@@ -111,16 +111,17 @@ function run(argv) {
   eq('width percent', C.widthValue('40%'), '40%');
   eq('width junk', C.widthValue('12px;color:red'), null);
 
-  // CSS with a fake DOM
-  const mkRow = (tag, index) => { const parent = { tagName: tag, children: [] }; const tr = { parentElement: parent }; parent.children[index] = tr; for (let i = 0; i < index; i++) parent.children[i] = {}; return tr; };
-  const fakeTable = { dataset: { tcsId: '7' }, rows: [mkRow('THEAD', 0), mkRow('TBODY', 0), mkRow('TBODY', 1)] };
-  const css = C.buildCss(fakeTable, t2, { strength: 0.2, drag: null });
-  eq('css rules', css.split('\n'), [
-    'table[data-tcs-id="7"] tr > :nth-child(1){width:160px!important;min-width:160px!important;max-width:160px!important;box-sizing:border-box;overflow-wrap:anywhere;}',
-    'table[data-tcs-id="7"] > tbody > tr:nth-child(2) > :nth-child(2){color:var(--color-red)!important}',
+  // What each cell should look like
+  const look = C.computeLook(t2, { strength: 0.2 }, null);
+  eq('look widths', look.widths, ['160px', null]);
+  eq('look cells', look.cells, [
+    [{ bg: null, fg: null }, { bg: null, fg: null }],
+    [{ bg: null, fg: null }, { bg: null, fg: null }],
+    [{ bg: null, fg: null }, { bg: null, fg: 'var(--color-red)' }],
   ]);
-  const css2 = C.buildCss(fakeTable, t2, { strength: 0.2, drag: { table: fakeTable, col: 1, width: 222 } });
-  eq('css drag override', css2.indexOf(':nth-child(2){width:222px') > 0, true);
+  eq('look drag override', C.computeLook(t2, { strength: 0.2 }, { col: 1, width: 222 }).widths, ['160px', '222px']);
+  const junk = C.parseTableAt(S('| a %%{width:9px;color:red}%% |\n| - |\n| b %%{bg:red;}body{x}%% |'), 0);
+  eq('look ignores unsafe values', C.computeLook(junk, { strength: 0.2 }, null).cells[1][0], { bg: null, fg: null });
 
 
   // Colour parsing and automatic text colour
@@ -136,12 +137,11 @@ function run(argv) {
   eq('auto: transparent fill untouched', C.autoTextColor('#00000033'), null);
   eq('auto: keyword uses resolver', C.autoTextColor('rgb(0, 0, 0)'), '#ffffff');
   const dark = C.parseTableAt(S('| a | b |\n| - | - |\n| x %%{bg:#1e3a8a}%% | y %%{bg:#1e3a8a; color:yellow}%% |'), 0);
-  const fake2 = { dataset: { tcsId: '9' }, rows: [mkRow('THEAD', 0), mkRow('TBODY', 0)] };
-  eq('css auto white text', C.buildCss(fake2, dark, { strength: 0.2, autoText: true }).split('\n'), [
-    'table[data-tcs-id="9"] > tbody > tr:nth-child(1) > :nth-child(1){background-color:#1e3a8a!important;color:#ffffff!important}',
-    'table[data-tcs-id="9"] > tbody > tr:nth-child(1) > :nth-child(2){background-color:#1e3a8a!important;color:var(--color-yellow)!important}',
+  eq('look auto white text, own colour wins', C.computeLook(dark, { strength: 0.2, autoText: true }, null).cells[1], [
+    { bg: '#1e3a8a', fg: '#ffffff' },
+    { bg: '#1e3a8a', fg: 'var(--color-yellow)' },
   ]);
-  eq('css auto text off', C.buildCss(fake2, dark, { strength: 0.2, autoText: false }).split('\n')[0].indexOf('color:#fff') < 0, true);
+  eq('look auto text off', C.computeLook(dark, { strength: 0.2, autoText: false }, null).cells[1][0], { bg: '#1e3a8a', fg: null });
 
   // Settings migration
   const migrated = C.normalizeSettings({ strength: 0.3, recent: ['#112233', 'not a colour', '#445566'] });

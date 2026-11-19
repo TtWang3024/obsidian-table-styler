@@ -1,5 +1,28 @@
 /* Table Styler */
 
+/*
+ * Cell styles. The plugin marks a cell (data-tcs-*) and puts the value in a CSS variable
+ * on it; !important lets a chosen colour beat theme stripes and hover backgrounds.
+ */
+td[data-tcs-bg],
+th[data-tcs-bg] {
+  background-color: var(--tcs-bg) !important;
+}
+
+td[data-tcs-fg],
+th[data-tcs-fg] {
+  color: var(--tcs-fg) !important;
+}
+
+td[data-tcs-w],
+th[data-tcs-w] {
+  box-sizing: border-box;
+  width: var(--tcs-w) !important;
+  min-width: var(--tcs-w) !important;
+  max-width: var(--tcs-w) !important;
+  overflow-wrap: anywhere;
+}
+
 /* Column edge: drag to resize, double-click for automatic width. */
 table.tcs-col-edge,
 table.tcs-col-edge * {
@@ -176,9 +199,10 @@ body.tcs-resizing * {
   box-sizing: border-box;
   width: 26px;
   height: 26px;
-  border: 1.5px solid var(--background-modifier-border);
+  border: 1.5px solid var(--tcs-swatch-rim, var(--background-modifier-border));
   border-radius: 50%;
-  background: var(--background-primary);
+  background: var(--tcs-swatch-bg, var(--background-primary));
+  color: var(--tcs-swatch-ink, var(--text-normal));
   cursor: pointer;
   font-size: 14px;
   line-height: 1;

@@ -354,62 +354,78 @@ function targetsBetween(table, from, to) {
 }
 
 /* ------------------------------------------------------------------ */
-/* CSS for one rendered table                                          */
+/* How each rendered cell should look                                  */
 /* ------------------------------------------------------------------ */
 
-function indexIn(el) {
-  return Array.prototype.indexOf.call(el.parentElement.children, el);
+/**
+ * The validated CSS values for every cell of a parsed table:
+ * { widths: [value|null per column], cells: rows of [{ bg, fg }] }.
+ * `drag` ({ col, width }) overrides one column while its edge is being dragged.
+ */
+function computeLook(table, opts, drag) {
+  const widths = table.rows[0].styles.map((st) => (st.width ? widthValue(st.width) : null));
+  if (drag) widths[drag.col] = drag.width + 'px';
+  const cells = table.rows.map((row) =>
+    row.styles.map((st) => {
+      const bg = st.bg ? bgValue(st.bg, opts.strength) : null;
+      let fg = st.color ? fgValue(st.color) : null;
+      if (!fg && bg && opts.autoText) fg = autoTextColor(st.bg, opts.resolve);
+      return { bg, fg };
+    })
+  );
+  return { widths, cells };
 }
 
-/**
- * Rules scoped to one <table data-tcs-id>. Selectors follow the real DOM
- * (thead/tbody or not), and use nth-child so they survive cells being re-rendered.
+/*
+ * The look is applied as a marker attribute plus a CSS variable on each cell, e.g.
+ * data-tcs-bg + --tcs-bg, and styles.css turns those into real styles. Plugins may not
+ * add <style> elements, and CSS variables keep themes in control of everything else.
  */
-function buildCss(tableEl, table, opts) {
-  const scope = 'table[data-tcs-id="' + tableEl.dataset.tcsId + '"]';
-  const rules = [];
+const CELL_VARS = [
+  ['bg', 'data-tcs-bg', '--tcs-bg'],
+  ['fg', 'data-tcs-fg', '--tcs-fg'],
+  ['w', 'data-tcs-w', '--tcs-w'],
+];
 
-  const widths = {};
-  table.rows[0].styles.forEach((st, c) => {
-    if (!st.width) return;
-    const w = widthValue(st.width);
-    if (w) widths[c] = w;
-  });
-  if (opts.drag && opts.drag.table === tableEl) widths[opts.drag.col] = opts.drag.width + 'px';
-  for (const c of Object.keys(widths)) {
-    const w = widths[c];
-    rules.push(
-      scope + ' tr > :nth-child(' + (Number(c) + 1) + '){width:' + w + '!important;min-width:' + w +
-        '!important;max-width:' + w + '!important;box-sizing:border-box;overflow-wrap:anywhere;}'
-    );
+/** What we last wrote to each cell, so a check never rewrites (and never loops on) equal values. */
+const appliedLook = new WeakMap();
+
+/** Bring one cell in line with `want` ({ bg, fg, w }). Returns true when something changed. */
+function setCellLook(cell, want) {
+  let last = appliedLook.get(cell);
+  if (!last) {
+    last = {};
+    appliedLook.set(cell, last);
   }
+  let changed = false;
+  for (const [key, attr, prop] of CELL_VARS) {
+    const value = want[key] || null;
+    if (value) {
+      // Obsidian's table editor can wipe a cell's style attribute; then the variable is gone.
+      if (last[key] !== value || !cell.style.getPropertyValue(prop)) {
+        cell.setCssProps({ [prop]: value });
+        changed = true;
+      }
+      if (!cell.hasAttribute(attr)) {
+        cell.setAttribute(attr, '');
+        changed = true;
+      }
+    } else if (last[key] || cell.hasAttribute(attr)) {
+      cell.removeAttribute(attr);
+      cell.style.removeProperty(prop);
+      changed = true;
+    }
+    last[key] = value;
+  }
+  return changed;
+}
 
-  const domRows = tableEl.rows;
-  table.rows.forEach((row, r) => {
-    const tr = domRows[r];
-    if (!tr || !tr.parentElement) return;
-    const parent = tr.parentElement;
-    const rowSel =
-      parent === tableEl
-        ? scope + ' > tr:nth-child(' + (indexIn(tr) + 1) + ')'
-        : scope + ' > ' + parent.tagName.toLowerCase() + ' > tr:nth-child(' + (indexIn(tr) + 1) + ')';
-    row.styles.forEach((st, c) => {
-      const decl = [];
-      if (st.bg) {
-        const v = bgValue(st.bg, opts.strength);
-        if (v) decl.push('background-color:' + v + '!important');
-      }
-      if (st.color) {
-        const v = fgValue(st.color);
-        if (v) decl.push('color:' + v + '!important');
-      } else if (st.bg && opts.autoText) {
-        const v = autoTextColor(st.bg, opts.resolve);
-        if (v) decl.push('color:' + v + '!important');
-      }
-      if (decl.length) rules.push(rowSel + ' > :nth-child(' + (c + 1) + '){' + decl.join(';') + '}');
-    });
-  });
-  return rules.join('\n');
+function clearCellLook(cell) {
+  for (const [, attr, prop] of CELL_VARS) {
+    cell.removeAttribute(attr);
+    cell.style.removeProperty(prop);
+  }
+  appliedLook.delete(cell);
 }
 
 /* ------------------------------------------------------------------ */
@@ -685,14 +701,16 @@ class StylePopover {
     if (!value) {
       s.addClass('tcs-swatch-none');
     } else if (kind === 'bg') {
-      s.style.backgroundColor = bgValue(value, this.plugin.settings.strength) || 'transparent';
-      // A very light fill still needs a visible rim.
-      s.style.borderColor =
-        brightness !== null && brightness > 230 ? 'var(--background-modifier-border)' : fgValue(value) || 'var(--background-modifier-border)';
+      const fill = bgValue(value, this.plugin.settings.strength);
+      // A very light fill keeps the default rim (styles.css) so it stays visible.
+      const rim = brightness !== null && brightness > 230 ? null : fgValue(value);
+      if (fill) s.setCssProps({ '--tcs-swatch-bg': fill });
+      if (rim) s.setCssProps({ '--tcs-swatch-rim': rim });
     } else {
       s.addClass('tcs-swatch-text');
       s.setText('A');
-      s.style.color = fgValue(value) || '';
+      const ink = fgValue(value);
+      if (ink) s.setCssProps({ '--tcs-swatch-ink': ink });
       // White or very light text is shown on a dark chip so it can be seen.
       if (brightness !== null && brightness > 200) s.addClass('tcs-swatch-on-dark');
     }
@@ -784,8 +802,7 @@ class StylePopover {
     let y = this.y + 6;
     if (x + w + pad > win.innerWidth) x = win.innerWidth - w - pad;
     if (y + h + pad > win.innerHeight) y = Math.max(pad, this.y - h - 6);
-    el.style.left = Math.max(pad, x) + 'px';
-    el.style.top = Math.max(pad, y) + 'px';
+    el.setCssStyles({ left: Math.max(pad, x) + 'px', top: Math.max(pad, y) + 'px' });
   }
 
   onDocPointer(e) {
@@ -1069,8 +1086,7 @@ class TableStylerPlugin extends Plugin {
     this.colourCache = new Map();
 
     this.nextId = 1;
-    this.entries = new WeakMap(); // tableEl -> { table, kind, host, styleEl }
-    this.liveTables = new Set(); // live preview tables, pruned when they leave the DOM
+    this.entries = new WeakMap(); // tableEl -> { table, kind, host, ctx }
     this.wired = new WeakSet();
     this.drag = null;
     this.popover = null;
@@ -1092,10 +1108,10 @@ class TableStylerPlugin extends Plugin {
 
     this.installMenuPatch();
     this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, info) => this.onEditorMenu(menu, editor, info)));
-    this.registerDomEvent(document, 'contextmenu', (e) => this.onContextMenuFallback(e));
+    this.registerDomEvent(activeDocument, 'contextmenu', (e) => this.onContextMenuFallback(e));
     this.registerEvent(
       this.app.workspace.on('window-open', (_ws, win) => {
-        this.registerDomEvent(win.document, 'contextmenu', (e) => this.onContextMenuFallback(e));
+        this.registerDomEvent(win.doc, 'contextmenu', (e) => this.onContextMenuFallback(e));
       })
     );
 
@@ -1145,7 +1161,7 @@ class TableStylerPlugin extends Plugin {
     if (this.popover) this.popover.close();
     for (const t of this.refreshTimers) window.clearTimeout(t);
     for (const d of this.openDocuments()) {
-      d.querySelectorAll('style[data-tcs-for]').forEach((s) => s.remove());
+      d.querySelectorAll('[data-tcs-bg], [data-tcs-fg], [data-tcs-w]').forEach((cell) => clearCellLook(cell));
       d.querySelectorAll('.tcs-col-edge').forEach((t) => t.removeClass('tcs-col-edge'));
       d.querySelectorAll('table[data-tcs-id]').forEach((t) => t.removeAttribute('data-tcs-id'));
     }
@@ -1206,8 +1222,8 @@ class TableStylerPlugin extends Plugin {
     if (this.colourCache.has(v)) return this.colourCache.get(v);
     let rgb = null;
     try {
-      const probe = document.body.createSpan();
-      probe.style.color = v;
+      const probe = activeDocument.body.createSpan();
+      probe.setCssStyles({ color: v });
       rgb = probe.style.color ? colorToRgb(getComputedStyle(probe).color) : null;
       probe.remove();
     } catch (e) {
@@ -1217,10 +1233,9 @@ class TableStylerPlugin extends Plugin {
     return rgb;
   }
 
-  cssOpts() {
+  lookOpts() {
     return {
       strength: this.settings.strength,
-      drag: this.drag,
       autoText: this.settings.autoText,
       resolve: (v) => this.resolveColour(v),
     };
@@ -1228,40 +1243,35 @@ class TableStylerPlugin extends Plugin {
 
   /* ---------- rendering ---------- */
 
-  /** Attach or refresh the <style> of one rendered table. */
+  /** Remember a rendered table's source and bring its cells in line with it. */
   applyTable(tableEl, table, kind, host, ctx) {
     if (!tableEl.dataset.tcsId) tableEl.dataset.tcsId = String(this.nextId++);
     let entry = this.entries.get(tableEl);
     if (!entry) {
-      entry = { table, kind, host, ctx: null, styleEl: null };
+      entry = { table, kind, host, ctx: null };
       this.entries.set(tableEl, entry);
     }
     entry.table = table;
     entry.kind = kind;
     entry.host = host;
     entry.ctx = ctx || null;
-    if (kind === 'live') this.liveTables.add(tableEl);
     this.paint(tableEl, entry);
     this.wireTable(tableEl);
   }
 
+  /** Map source cells onto DOM cells by position: row r of the source is tableEl.rows[r]. */
   paint(tableEl, entry) {
-    const css = buildCss(tableEl, entry.table, this.cssOpts());
-    if (!css) {
-      if (entry.styleEl) entry.styleEl.remove();
-      entry.styleEl = null;
-      return;
+    const drag = this.drag && this.drag.table === tableEl ? this.drag : null;
+    const look = computeLook(entry.table, this.lookOpts(), drag);
+    const rows = tableEl.rows;
+    for (let r = 0; r < rows.length; r++) {
+      const cells = rows[r].cells;
+      const lookRow = look.cells[r] || [];
+      for (let c = 0; c < cells.length; c++) {
+        const cl = lookRow[c] || {};
+        setCellLook(cells[c], { bg: cl.bg, fg: cl.fg, w: look.widths[c] });
+      }
     }
-    const doc = tableEl.ownerDocument;
-    if (!entry.styleEl) {
-      entry.styleEl = doc.createElement('style');
-      entry.styleEl.setAttribute('data-tcs-for', tableEl.dataset.tcsId);
-    }
-    // Live preview widgets are rebuilt by Obsidian, so their styles sit in <head>;
-    // reading view sections are cached and re-attached, so their style travels with them.
-    const parent = entry.kind === 'live' ? doc.head : entry.host || tableEl.parentElement;
-    if (entry.styleEl.parentNode !== parent) parent.appendChild(entry.styleEl);
-    if (entry.styleEl.textContent !== css) entry.styleEl.textContent = css;
   }
 
   repaint(tableEl) {
@@ -1323,7 +1333,7 @@ class TableStylerPlugin extends Plugin {
   }
 
   openDocuments() {
-    const docs = new Set([document]);
+    const docs = new Set([activeDocument]);
     this.app.workspace.iterateAllLeaves((leaf) => {
       const d = leaf.view && leaf.view.containerEl && leaf.view.containerEl.ownerDocument;
       if (d) docs.add(d);
@@ -1340,8 +1350,22 @@ class TableStylerPlugin extends Plugin {
           this.view = view;
           this.frame = 0;
           this.win = view.dom.ownerDocument.defaultView || window;
-          this.observer = new MutationObserver(() => this.schedule());
-          this.observer.observe(view.contentDOM, { childList: true, subtree: true });
+          // New or rebuilt widgets (childList), and Obsidian wiping a cell's style
+          // attribute when it starts editing that cell (attributes: style).
+          this.observer = new MutationObserver((records) => {
+            for (const rec of records) {
+              if (rec.type === 'childList' || (rec.target.closest && rec.target.closest('.cm-table-widget'))) {
+                this.schedule();
+                return;
+              }
+            }
+          });
+          this.observer.observe(view.contentDOM, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style'],
+          });
           this.schedule();
         }
         update(u) {
@@ -1367,13 +1391,6 @@ class TableStylerPlugin extends Plugin {
   }
 
   scanLive(view) {
-    for (const t of Array.from(this.liveTables)) {
-      if (!t.isConnected) {
-        const entry = this.entries.get(t);
-        if (entry && entry.styleEl) entry.styleEl.remove();
-        this.liveTables.delete(t);
-      }
-    }
     const widgets = view.contentDOM.querySelectorAll('.cm-table-widget');
     if (!widgets.length) return;
     const doc = view.state.doc;
@@ -1733,7 +1750,7 @@ TableStylerPlugin.core = {
   fgValue,
   widthValue,
   isSafeColor,
-  buildCss,
+  computeLook,
   colorToRgb,
   autoTextColor,
   normalizeSettings,
